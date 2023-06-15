@@ -3,7 +3,7 @@
 
 <p align="center">Similar to CharacterAI, but open source, and with much deeper character customization.</p>
 
-<p align="center"><b>⟶ <a href="https://the-acronyx.github.io/OpenCharacters">Try it!</a> ⟵</b></p>
+<p align="center"><b>⟶ <a href="https://josephrocca.github.io/OpenCharacters">Try it!</a> ⟵</b></p>
 
 <p align="center"><a href="https://discord.gg/5tkWXJFqPV">Discord Server</a></p>
 
