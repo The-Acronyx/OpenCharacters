@@ -1687,15 +1687,17 @@
         // shift messages off `messagesWeNeedToAdd` until we find one that doesn't *exactly* match the same-index element that is already in the feed
         let lastMatchingMessageEl;
         let preexistingMessageEls = [];
-        for(let messageEl of $.messageFeed.querySelectorAll(".message")) {
-          let messageObj = messagesWeNeedToAdd[0];
-          let messageObjHash = await sha256Text(JSON.stringify(messageObj));
-          if(messageEl.dataset.hash === messageObjHash) {
-            lastMatchingMessageEl = messageEl;
-            messagesWeNeedToAdd.shift();
-            preexistingMessageEls.push(messageEl);
-          } else {
-            break;
+        if(!opts.forceFullRender) {
+          for(let messageEl of $.messageFeed.querySelectorAll(".message")) {
+            let messageObj = messagesWeNeedToAdd[0];
+            let messageObjHash = await sha256Text(JSON.stringify(messageObj));
+            if(messageEl.dataset.hash === messageObjHash) {
+              lastMatchingMessageEl = messageEl;
+              messagesWeNeedToAdd.shift();
+              preexistingMessageEls.push(messageEl);
+            } else {
+              break;
+            }
           }
         }
 
@@ -1778,6 +1780,9 @@
           doBotReplyIfNeeded(); // we shouldn't `await` this because thread is already rendered.
         }
       }
+
+      // for debugging:
+      window.renderMessageFeed = renderMessageFeed;
       
       let threadIdToMusicPermission = {}
       let updateThreadSceneCounter = 0;
@@ -1949,8 +1954,11 @@
           // debugger;
           if(result) {
             if(usingThreadReminderMessage) {
-              thread.character.reminderMessage = result.reminderMessage;
-              await db.threads.put(thread);
+              await db.transaction('rw', db.threads, async tx => {
+                thread = await tx.table("threads").get(threadId);
+                thread.character.reminderMessage = result.reminderMessage;
+                await tx.table("threads").put(thread);
+              });
             } else {
               await db.characters.update(characterId, {reminderMessage:result.reminderMessage});
             }
@@ -2653,7 +2661,7 @@
         if(thread.currentSummaryHashChain === undefined) {
           let { instructionHashChain } = await computeAndSaveThreadSummaryIfNeeded({threadId, exitOnFirstHashMissAndReturnHashChain:true});
           thread.currentSummaryHashChain = instructionHashChain;
-          await db.threads.put(thread);
+          await db.threads.update(threadId, {currentSummaryHashChain:instructionHashChain});
         }
 
         activeThreadId = threadId;
@@ -3455,7 +3463,7 @@
         if(thread.currentSummaryHashChain === undefined) {
           let { instructionHashChain } = await computeAndSaveThreadSummaryIfNeeded({threadId:thread.id, exitOnFirstHashMissAndReturnHashChain:true});
           thread.currentSummaryHashChain = instructionHashChain;
-          await db.threads.put(thread);
+          await db.threads.update(thread.id, {currentSummaryHashChain:instructionHashChain});
         }
 
         return thread.currentSummaryHashChain;
@@ -6219,9 +6227,7 @@
           if(debounceTimeout) clearTimeout(debounceTimeout);
           debounceTimeout = setTimeout(async function() {
             let threadId = activeThreadId;
-            let thread = await db.threads.get(threadId);
-            thread.unsentMessageText = $.messageInput.value;
-            await db.threads.put(thread);
+            await db.threads.update(threadId, {unsentMessageText: $.messageInput.value});
           }, 500);
         });
       }
@@ -6601,12 +6607,11 @@
                   warningMessage += `\n\nIt's best to do any name changes at the start of the thread, before summaries${threadCharacter.associativeMemoryMethod !== "none" ? " and memories" : ""} start to be computed/stored.`;
                   alert(warningMessage);
                 }
-
               } else if(message.startsWith("/avatar ")) {
                 thread.userCharacter.avatar.url = arg;
               }
-              await db.threads.put(thread);
-              await renderMessageFeed(threadId);
+              await db.threads.update(threadId, {userCharacter: thread.userCharacter});
+              await renderMessageFeed(threadId, {forceFullRender:true});
               $.messageInput.value = "";
             } else {
 
@@ -7345,7 +7350,7 @@
           if(args.width !== undefined && typeof args.width === "number" || typeof args.width === "string") {
             thread.customCodeWindow.width = args.width;
           }
-          await db.threads.put(thread);
+          await db.threads.update(threadId, {customCodeWindow: thread.customCodeWindow});
           await updateCustomCodeIframeVisibility();
         }
       });
@@ -7411,7 +7416,7 @@
           let visibleThreadId = activeThreadId;
           let visibleThread = await db.threads.get(visibleThreadId);
           visibleThread.customCodeWindow.width = $.customCodeIframeCtn.offsetWidth;
-          await db.threads.put(visibleThread);
+          await db.threads.update(visibleThreadId, {customCodeWindow: visibleThread.customCodeWindow});
         };
         window.addEventListener("mousemove", mousemove);
         window.addEventListener("mouseup", mouseup);
@@ -7691,8 +7696,8 @@
         
         // OTHER THREAD STUFF:
         let threadListChanged = false;
-        {
-          let thread = await db.threads.get(threadId);
+        await db.transaction('rw', db.threads, async tx => {
+          let thread = await tx.table("threads").get(threadId);
           let changed = false;
           if(receivedData.thread?.userCharacter) {
             applyObjectOverrides({object:thread.userCharacter, overrides:receivedData.thread.userCharacter});
@@ -7720,9 +7725,9 @@
             changed = true;
           }
           if(changed) {
-            await db.threads.put(thread);
+            await tx.table("threads").put(thread);
           }
-        }
+        });
 
         if(threadListChanged) {
           await renderThreadList();
@@ -7850,14 +7855,14 @@
           name: {label: "Shortcut name:", type: "textLine", placeholder:"user reply"},
           message: {label: "Message text:", type: "text", height:"fit-content", minHeight:"2rem", placeholder:"/user write an intersting first-person reply"},
           insertionType: {label: "Insertion type:", type: "select", options:[{content:"Replace existing text", value:"replace"}, {content: "Add to 𝗲𝗻𝗱 of existing text", value:"append"}, {content: "Add to 𝘀𝘁𝗮𝗿𝘁 of existing text", value:"prepend"}]},
-          autoSend: {label: "Auto-send?", type: "select", options:[{content:"Yes, send on click", value:"yes"}, {content: "No, just put it in the text area", value:"no"}]},
+          autoSend: {label: "Auto-send?", type: "select", options:[{content:"Yes, send on click", value:"yes"}, {content: "No, just put it in the text box", value:"no"}]},
         });
         if(!shortcut) return;
         shortcut.autoSend = (shortcut.autoSend === "yes");
         shortcut.type = "message";
         let thread = await db.threads.get(activeThreadId);
         thread.shortcutButtons.push(shortcut);
-        await db.threads.put(thread);
+        await db.threads.update(thread.id, {shortcutButtons: thread.shortcutButtons});
         await renderShortcutButtons(thread);
       });
 
