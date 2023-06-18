@@ -652,39 +652,37 @@ export function jsonToBlob(json) {
   const seen = new WeakSet();
 
   function processValue(value) {
-    if (seen.has(value)) {
+    if(seen.has(value)) {
       throw new TypeError("Converting circular structure to JSON");
     }
 
-    if (value && typeof value.toJSON === "function") {
+    if(value && typeof value.toJSON === "function") {
       value = value.toJSON();
     }
 
-    if (typeof value === 'object' && value !== null) {
+    if(typeof value === 'object' && value !== null) {
       seen.add(value);
 
       const blobParts = [];
       const entries = Array.isArray(value) ? value : Object.entries(value);
-      for (let i = 0; i < entries.length; i++) {
-        if (Array.isArray(value)) {
-          if (typeof entries[i] !== "function") {
-            blobParts.push(processValue(typeof entries[i] !== "undefined" ? entries[i] : null));
-          }
+      for(let i = 0; i < entries.length; i++) {
+        if(Array.isArray(value)) {
+          blobParts.push(processValue(entries[i]));
         } else {
           const [key, val] = entries[i];
-          if (typeof val !== "undefined" && typeof val !== "function") {
-            blobParts.push(textEncoder.encode(JSON.stringify(key) + ':'), processValue(val));
-          }
+          blobParts.push(textEncoder.encode(JSON.stringify(key) + ':'), processValue(val));
         }
-        if (i !== entries.length - 1) blobParts.push(textEncoder.encode(','));
+        if(i !== entries.length - 1) blobParts.push(textEncoder.encode(','));
       }
 
       const startBracket = Array.isArray(value) ? '[' : '{';
       const endBracket = Array.isArray(value) ? ']' : '}';
       return new Blob([textEncoder.encode(startBracket), ...blobParts, textEncoder.encode(endBracket)]);
+    } else if(typeof value === 'function' || typeof value === 'undefined') {
+      return textEncoder.encode("null");
     } else {
       // For primitives we just convert it to string and encode
-      return textEncoder.encode(JSON.stringify(typeof value !== "function" ? value : null));
+      return textEncoder.encode(JSON.stringify(value));
     }
   }
 
